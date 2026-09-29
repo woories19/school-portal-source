@@ -58,7 +58,10 @@ SP.drawers.student = function (a) {
     body = '<div class="mini3"><div><span>Present</span><b>' + cnt('P') + '</b></div><div><span>Absent</span><b class="neg">' + cnt('A') + '</b></div><div><span>Leave</span><b>' + cnt('L') + '</b></div></div><h4>Last 30 school days</h4><div class="attgrid">' +
       SP.DAYS.map((d, i) => '<div class="ac ' + (a[i] || 'P') + '" title="' + D.nice(d) + '"><span>' + (+d.slice(8)) + '</span></div>').join('') + '</div><div class="legend"><i class="P"></i>Present <i class="A"></i>Absent <i class="L"></i>Leave</div>';
   } else if (tab === 'academics') {
-    body = '<h4>Recent quizzes</h4>' + SP.QUIZZES.filter(q => q.classId === s.classId).map(q => { const sc = SP.quizScore(q, s); return '<div class="qrow"><div><b>' + esc(q.title) + '</b><span>' + D.nice(q.date) + '</span></div><div class="qbar"><i style="width:' + pct(sc, q.total) + '%"></i></div><b>' + sc + '/' + q.total + '</b></div>'; }).join('') +
+    const ex = SP.S.exams.filter(e => e.status === 'published'), as = SP.allAssign().filter(a => a.classId === s.classId).map(a => ({ a, sb: SP.sub(a, s) })).slice(-5).reverse();
+    body = '<h4>Exam results</h4>' + (ex.map(e => { const c = SP.examCard(e, s), r = SP.classRank(e, s); return '<div class="qrow"><div><b>' + esc(e.name) + '</b><span>Position ' + r.pos + ' of ' + r.of + '</span></div><div class="qbar"><i style="width:' + c.pct + '%"></i></div><b>' + c.pct + '% · ' + c.grade[0] + '</b></div>'; }).join('') || '<p class="muted">No published results yet.</p>') +
+      '<h4>Assignments</h4>' + as.map(x => '<div class="qrow"><div><b>' + esc(x.a.title) + '</b><span>' + esc(x.a.subject) + ' · due ' + D.nice(x.a.due) + '</span></div><div></div><b>' + (x.sb ? (x.sb.status === 'graded' ? x.sb.marks + '/' + x.a.total : 'Submitted') : (SP.assignState(x.a) === 'closed' ? 'Missed' : 'Pending')) + '</b></div>').join('') +
+      '<h4>Quizzes</h4>' + SP.allQuizzes().filter(q => q.classId === s.classId && q.status !== 'draft').map(q => ({ q, at: SP.attempt(q, s) })).filter(x => x.at).slice(0, 5).map(x => '<div class="qrow"><div><b>' + esc(x.q.title) + '</b><span>' + D.nice(x.q.date) + '</span></div><div class="qbar"><i style="width:' + pct(x.at.score, SP.quizTotal(x.q)) + '%"></i></div><b>' + x.at.score + '/' + SP.quizTotal(x.q) + '</b></div>').join('') +
       '<h4>Subject teachers</h4>' + SP.kv(SP.SUBJECTS.map(sub => [sub, esc(SP.teacher(SP.ALLOC[s.classId][sub]).name)]));
   } else {
     const sibs = SP.kids(p.id).filter(k => k.id !== s.id);
@@ -67,7 +70,7 @@ SP.drawers.student = function (a) {
       '<h4>References</h4>' + SP.kv([['Emergency contact', esc(s.eContact.name)], ['Emergency phone', esc(s.eContact.phone)]]) +
       '<h4>Student–teacher preferences</h4><div class="note">' + I('star') + esc(s.pref) + '</div>';
   }
-  return '<div class="dr-h"><div>' + SP.person(s.name, c.label + ' · Roll ' + s.roll, 'lg') + '</div><div class="row-c" style="gap:8px">' + SP.feePill(s.id) + '<button class="btn ghost icon" data-act="closeDrawer">' + I('x') + '</button></div></div><div class="dr-tabs">' + tabs + '</div><div class="dr-b">' + body + '</div>';
+  return '<div class="dr-h"><div>' + SP.person(s.name, c.label + ' · Roll ' + s.roll, 'lg') + '</div><div class="row-c" style="gap:8px">' + SP.feePill(s.id) + '<button class="btn ghost icon" data-act="closeDrawer">' + I('x') + '</button></div></div><div class="dr-tabs">' + tabs + '</div><div class="dr-b" data-scroll="drb">' + body + '</div>';
 };
 const voucherPill = v => !v.sent ? SP.pill('Draft', 'gray') : v.paid ? SP.pill('Paid', 'green') : v.due < TODAY ? SP.pill('Overdue', 'red') : SP.pill('Due', 'amber');
 SP.voucherPill = voucherPill;
@@ -269,8 +272,14 @@ SP.act.attAll = () => { const dr = SP.ui.draft[draftKey()]; Object.keys(dr).forE
 SP.act.attSubmit = () => {
   const S = SP.S, cid = draftKey(), dr = SP.ui.draft[cid]; let n = 0;
   SP.inClass(cid).forEach(s => { const before = S.attToday[s.id]; S.attToday[s.id] = dr[s.id]; if (dr[s.id] !== 'P' && before !== dr[s.id]) { n++; SP.notify([s.id], { kind: 'attendance', title: dr[s.id] === 'A' ? s.first + ' marked absent' : s.first + ' marked on leave', body: s.name + ' was marked ' + (dr[s.id] === 'A' ? 'absent' : 'on leave') + ' today, ' + D.long(TODAY) + '.' }); } });
-  S.attSubmitted[cid] = true; SP.toast('Attendance saved for ' + SP.cls(cid).label + ' · ' + n + ' parent' + (n === 1 ? '' : 's') + ' notified'); SP.render();
+  S.attSubmitted[cid] = true; S.attTimes[cid] = D.time(SP.NOW_MIN + S.clock); SP.toast('Attendance saved for ' + SP.cls(cid).label + ' · ' + n + ' parent' + (n === 1 ? '' : 's') + ' notified'); SP.render();
 };
+function sigCard(cid) {
+  const studs = SP.inClass(cid), unsigned = studs.filter(s => !SP.diarySigned(s.id, TODAY)), n = studs.length - unsigned.length;
+  return SP.card('Parent signatures · today', '<div class="row-c" style="gap:12px;flex-wrap:nowrap"><div class="qbar grow" style="height:10px"><i style="width:' + pct(n, studs.length) + '%;background:var(--green)"></i></div><b>' + n + '/' + studs.length + ' signed</b></div>' +
+    (unsigned.length ? '<p class="hint" style="margin:10px 0 6px">Not signed yet: ' + unsigned.slice(0, 6).map(s => esc(s.first)).join(', ') + (unsigned.length > 6 ? ' +' + (unsigned.length - 6) : '') + '</p>' + SP.btn('Remind ' + unsigned.length + ' parents', 'dyRemind', { c: 'sm pri', i: 'bell', d: { c: cid } }) : '<div class="note ok">' + I('check') + '<span>Every parent has signed the diary today.</span></div>'));
+}
+SP.act.dyRemind = d => { const un = SP.inClass(d.c).filter(s => !SP.diarySigned(s.id, TODAY)); un.forEach(s => SP.notify([s.id], { kind: 'diary', title: 'Please sign the diary', body: 'Open Learn, then Diary, and tap Sign.', who: 'parent' })); SP.deliver({ title: 'Diary signature reminder', total: un.length, channels: ['push'] }); SP.render(); };
 P['teacher.diary'] = function () {
   const S = SP.S, t = SP.teacher(S.teacherId), cid = SP.f('dy_c', t.classId || '5A'), mine = S.diary.filter(d => d.classId === cid).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
   return SP.head('Homework & diary', 'Post to every parent in the class instantly', '') + '<div class="g21"><section class="card"><div class="card-h"><h3>New post</h3></div><div class="card-b">' +
@@ -278,7 +287,7 @@ P['teacher.diary'] = function () {
     '<div class="row2"><div class="field"><label>Subject</label><select class="input" id="dy-sub">' + SP.SUBJECTS.map(s => '<option>' + s + '</option>').join('') + '</select></div><div class="field"><label>Due date</label><input type="date" class="input" id="dy-due" value="' + D.add(TODAY, 1) + '"></div></div>' +
     '<div class="field"><label>Title</label><input class="input" id="dy-title" value="Practice worksheet" autocomplete="off"></div><div class="field"><label>Details</label><textarea class="input" id="dy-text" rows="4">Complete both sides of the worksheet and revise tomorrow\'s topic.</textarea></div>' +
     SP.btn('Post to class', 'dyPost', { c: 'pri', i: 'send', tour: 'dy-post' }) + '</div></section>' +
-    SP.card('Recent posts · ' + SP.cls(cid).label, mine.map(d => '<div class="post"><div class="row-c"><b>' + esc(d.title) + '</b>' + SP.pill(d.type === 'note' ? 'Note' : 'Homework', d.type === 'note' ? 'gray' : 'blue') + '</div><p>' + esc(d.text) + '</p><span class="muted">' + esc(d.subject) + ' · ' + D.nice(d.date) + (d.due ? ' · due ' + D.nice(d.due) : '') + '</span></div>').join('')) + '</div>';
+    SP.card('Recent posts · ' + SP.cls(cid).label, mine.map(d => '<div class="post"><div class="row-c"><b>' + esc(d.title) + '</b>' + SP.pill(d.type === 'note' ? 'Note' : 'Homework', d.type === 'note' ? 'gray' : 'blue') + '</div><p>' + esc(d.text) + '</p><span class="muted">' + esc(d.subject) + ' · ' + D.nice(d.date) + (d.due ? ' · due ' + D.nice(d.due) : '') + '</span></div>').join('')) + '</div>' + sigCard(cid);
 };
 SP.act.dyPost = () => { const cid = SP.f('dy_c', SP.teacher(SP.S.teacherId).classId || '5A'); SP.postDiary({ classId: cid, subject: $v('dy-sub'), type: $v('dy-type'), title: $v('dy-title') || 'Post', text: $v('dy-text'), due: $v('dy-type') === 'note' ? null : $v('dy-due'), teacherId: SP.S.teacherId }); SP.render(); };
 P['teacher.timetable'] = function () {

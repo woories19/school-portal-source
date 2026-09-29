@@ -59,7 +59,7 @@ for (let i = 0; i < 24; i++) {
 }
 CLASSES.forEach((c, i) => { c.teacherId = TEACHERS[i].id; });
 const ALLOC = {}; // classId -> subject -> teacherId
-CLASSES.forEach((c, ci) => { ALLOC[c.id] = {}; SUBJECTS.forEach((s, si) => { ALLOC[c.id][s] = TEACHERS[(ci * 5 + si * 3) % TEACHERS.length].id; }); });
+CLASSES.forEach((c, ci) => { ALLOC[c.id] = {}; SUBJECTS.forEach((s, si) => { ALLOC[c.id][s] = TEACHERS[(ci * 2 + si * 3) % TEACHERS.length].id; }); });
 const OFFICE = ['Principal', 'Vice Principal', 'Admissions Officer', 'Accountant', 'Front Desk Officer', 'Librarian', 'IT Support', 'Exam Coordinator', 'Facilities Manager', 'Office Assistant'];
 const STAFF_OFFICE = OFFICE.map((role, i) => { const m = rt.chance(.55); return { id: 'O' + pad(i + 1), name: rt.pick(m ? MAN : WOMAN) + ' ' + rt.pick(SUR), gender: m ? 'M' : 'F', phone: '03' + rt.int(10, 49) + '-' + rt.int(1000000, 9999999), role, title: role }; });
 const STAFF_ALL = TEACHERS.concat(STAFF_OFFICE);
@@ -223,7 +223,7 @@ function seedDiary() {
   CLASSES.forEach(c => {
     for (let i = 0; i < 3; i++) {
       const sub = SUBJECTS[(i * 2 + c.grade) % SUBJECTS.length];
-      out.push({ id: 'D' + pad(out.length + 1, 3), classId: c.id, subject: sub, type: 'homework', title: sub + ' homework', text: r.pick(hw), date: D.add(TODAY, -(i + 1)), due: D.add(TODAY, 1 + i), teacherId: ALLOC[c.id][sub] });
+      out.push({ id: 'D' + pad(out.length + 1, 3), classId: c.id, subject: sub, type: 'homework', title: sub + ' homework', text: r.pick(hw), date: D.add(TODAY, -i), due: D.add(TODAY, 1 + i), teacherId: ALLOC[c.id][sub] });
     }
     out.push({ id: 'D' + pad(out.length + 1, 3), classId: c.id, subject: 'General', type: 'note', title: 'Note from class teacher', text: 'Please send water bottles daily and cover notebooks with labels.', date: D.add(TODAY, -1), due: null, teacherId: c.teacherId });
   });

@@ -62,7 +62,10 @@ P['admin.dashboard'] = function () {
     [SP.unreadAdmin(), 'unread parent messages', 'chat', 'blue', 'nav', 'comms'],
     [pendingLeave, 'leave requests awaiting approval', 'cal', 'amber', 'nav', 'comms'],
     [S.applicants.filter(a => a.stage === 'new').length, 'new admission applications', 'userplus', 'green', 'nav', 'admissions'],
-    [held, 'students on fee hold at the gate', 'lock', 'red', 'nav', 'gate']
+    [held, 'students on fee hold at the gate', 'lock', 'red', 'nav', 'gate'],
+    [S.applicants.filter(SP.admFeeReady).length, 'paid admissions ready to enrol', 'check', 'green', 'nav', 'admissions'],
+    [SP.marksPending(), 'exam mark entries still pending (Unit Test 2)', 'award', 'brand', 'nav', 'exams'],
+    [SP.S.forms.reduce((n, f) => n + SP.consentStats(f).pending, 0), 'consent responses still pending', 'board', 'amber', 'nav', 'circulars']
   ].filter(a => a[0] > 0).map(a => '<button class="att-row" data-act="' + a[4] + '" data-r="' + a[5] + '"><span class="ai ' + a[3] + '">' + I(a[2]) + '</span><span><b>' + a[0] + '</b> ' + a[1] + '</span>' + I('right') + '</button>').join('');
 
   // fees
@@ -83,66 +86,6 @@ SP.act.dashTile = d => { SP.ui.f.dash = d.k; SP.ui.page['dash-' + d.k] = 0; SP.r
 SP.act.dashExport = () => { const st = SP.stats(); SP.csv('campus-snapshot.csv', ['Metric', 'Value'], [['Date', TODAY], ['Total students', st.total], ['Checked in', st.present], ['Absent', st.absent], ['On leave', st.leave], ['Not marked', st.unmarked], ['Staff in', st.staffIn + '/' + st.staffTotal]]); };
 SP.act.msgStudent = d => SP.openModal('newchat', { studentId: d.id });
 
-/* =============================== ADMISSIONS =============================== */
-const STAGES = [['new', 'New', 'blue'], ['reviewed', 'Reviewed', 'gray'], ['interview', 'Interview', 'amber'], ['accepted', 'Accepted', 'green'], ['admitted', 'Admitted', 'green'], ['rejected', 'Rejected', 'red']];
-const stageOf = k => STAGES.find(s => s[0] === k);
-const stagePill = k => SP.pill(stageOf(k)[1], stageOf(k)[2]);
-P['admin.admissions'] = function () {
-  const S = SP.S, q = SP.f('adm_q').toLowerCase(), stg = SP.f('adm_stage'), gr = SP.f('adm_grade');
-  const tiles = STAGES.map(s => SP.tile({ label: s[1], value: S.applicants.filter(a => a.stage === s[0]).length, act: 'setFilter', attrs: 'data-k="adm_stage" data-pk="adm" data-v="' + (stg === s[0] ? '' : s[0]) + '"', sel: stg === s[0], tour: s[0] === 'new' ? 'adm-new' : '' })).join('');
-  const list = S.applicants.filter(a => (!stg || a.stage === stg) && (!gr || String(a.grade) === gr) && (!q || (a.name + a.ref + a.parent + a.phone).toLowerCase().indexOf(q) > -1)).sort((a, b) => b.submitted.localeCompare(a.submitted) || b.id.localeCompare(a.id));
-  return SP.head('Admissions', S.applicants.length + ' applications this session · 2026–27', SP.btn('Simulate online application', 'admSimulate', { i: 'plus', c: 'pri', tour: 'adm-sim' })) +
-    '<div class="tiles6">' + tiles + '</div>' +
-    '<div class="toolbar">' + SP.search('adm_q', 'Search name, reference or phone') + SP.select('adm_grade', [['', 'All grades']].concat([1, 2, 3, 4, 5, 6, 7, 8].map(g => [g, 'Grade ' + g])), gr) +
-    (stg ? SP.btn('Clear stage filter', 'setFilter', { c: 'sm', d: { k: 'adm_stage', v: '' } }) : '') + '</div>' +
-    SP.table('adm', [
-      { h: 'Applicant', f: a => SP.person(a.name, a.ref) }, { h: 'Applying for', f: a => 'Grade ' + a.grade }, { h: 'Parent', f: a => esc(a.parent) + '<div class="s">' + esc(a.phone) + '</div>' },
-      { h: 'Source', f: a => '<span class="muted">' + a.source + '</span>' }, { h: 'Submitted', f: a => D.nice(a.submitted) }, { h: 'Stage', f: a => stagePill(a.stage) + (a.stage === 'interview' && a.interviewOn ? '<div class="s">' + D.nice(a.interviewOn) + ', 10:30</div>' : '') },
-      { h: '', cls: 'r', f: a => SP.btn('Details', 'admOpen', { c: 'sm', d: { id: a.id } }) }
-    ], list, { per: 9, row: 'admOpen', tourRow: 'adm-row' });
-};
-SP.act.admOpen = d => SP.openDrawer('applicant', { id: d.id });
-SP.act.admSimulate = () => {
-  const S = SP.S, q = SP.APP_QUEUE[S.queueIdx % SP.APP_QUEUE.length]; S.queueIdx++;
-  const a = { id: SP.uid('A'), ref: 'ADM-2609-' + Math.floor(1000 + Math.random() * 8999).toString(36).toUpperCase(), name: q.name, gender: q.gender, dob: (2021 - q.grade) + '-04-12', grade: q.grade, prevSchool: q.prevSchool, parent: q.parent, rel: q.rel, phone: q.phone, source: 'portal', submitted: TODAY, stage: 'new', interviewOn: null, voucherIssued: false, studentId: null, log: [['Application received via online form', TODAY]] };
-  S.applicants.unshift(a); SP.ui.f.adm_stage = ''; SP.ui.f.adm_q = ''; SP.ui.page.adm = 0;
-  SP.toast('New online application from ' + q.parent + ' for ' + q.name); SP.render();
-};
-function appl(id) { return SP.S.applicants.find(a => a.id === id); }
-function stageTo(a, st, note, toast) { a.stage = st; a.log.push([note, TODAY]); SP.toast(toast); SP.render(); }
-SP.drawers.applicant = function (args) {
-  const a = appl(args.id), c = SP.CLASSES.filter(x => x.grade === a.grade);
-  let act = '';
-  if (a.stage === 'new') act = SP.btn('Mark as reviewed', 'admReview', { c: 'pri', d: { id: a.id }, tour: 'adm-review' }) + SP.btn('Reject', 'admReject', { c: 'danger', d: { id: a.id } });
-  else if (a.stage === 'reviewed') act = '<div class="field"><label>Interview date</label><input class="input" type="date" id="int-date" value="' + D.add(TODAY, 2) + '"></div>' + SP.btn('Schedule interview & notify parent', 'admInterview', { c: 'pri', d: { id: a.id }, tour: 'adm-int' }) + SP.btn('Reject', 'admReject', { c: 'danger', d: { id: a.id } });
-  else if (a.stage === 'interview') act = SP.btn('Accept applicant', 'admAccept', { c: 'pri', d: { id: a.id }, tour: 'adm-accept' }) + SP.btn('Reject', 'admReject', { c: 'danger', d: { id: a.id } });
-  else if (a.stage === 'accepted') act = (a.voucherIssued ? '<div class="note ok">' + I('check') + 'Admission voucher issued and sent to the parent.</div>' + SP.btn('Confirm fee received & admit', 'admAdmit', { c: 'pri', d: { id: a.id }, tour: 'adm-admit' }) : SP.btn('Issue admission voucher', 'admVoucher', { c: 'pri', d: { id: a.id }, tour: 'adm-voucher' }));
-  else if (a.stage === 'rejected') act = SP.btn('Reopen application', 'admReopen', { c: '', d: { id: a.id } });
-  else if (a.stage === 'admitted' && a.studentId) act = SP.btn('Open student profile', 'openStudent', { c: 'pri', d: { id: a.studentId } });
-  else if (a.stage === 'admitted') act = '<div class="note ok">' + I('check') + 'Enrolled — student record created.</div>';
-  return '<div class="dr-h"><div>' + SP.person(a.name, a.ref, 'lg') + '</div><button class="btn ghost icon" data-act="closeDrawer">' + I('x') + '</button></div><div class="dr-b">' +
-    '<div class="row-c" style="gap:8px">' + stagePill(a.stage) + '<span class="muted">Applying for Grade ' + a.grade + '</span></div>' +
-    SP.kv([['Date of birth', D.niceY(a.dob)], ['Gender', a.gender === 'F' ? 'Female' : 'Male'], ['Previous school', esc(a.prevSchool)], ['Guardian', esc(a.parent) + ' (' + a.rel + ')'], ['Phone', esc(a.phone)], ['Source', a.source], ['Sections available', c.map(x => x.section + ' (' + SP.inClass(x.id).length + ' students)').join(' · ')]]) +
-    '<div class="dr-act">' + act + '</div>' +
-    '<h4>Timeline</h4><ul class="timeline">' + a.log.slice().reverse().map(l => '<li><b>' + esc(l[0]) + '</b><span>' + D.nice(l[1]) + '</span></li>').join('') + '</ul></div>';
-};
-SP.act.admReview = d => stageTo(appl(d.id), 'reviewed', 'Documents reviewed', 'Marked as reviewed');
-SP.act.admInterview = d => { const a = appl(d.id), dt = $v('int-date') || D.add(TODAY, 2); a.interviewOn = dt; stageTo(a, 'interview', 'Interview scheduled for ' + D.nice(dt), 'Interview booked · SMS sent to ' + a.parent); };
-SP.act.admAccept = d => stageTo(appl(d.id), 'accepted', 'Accepted by principal', 'Applicant accepted');
-SP.act.admReject = d => stageTo(appl(d.id), 'rejected', 'Application rejected', 'Application rejected');
-SP.act.admReopen = d => stageTo(appl(d.id), 'reviewed', 'Reopened', 'Application reopened');
-SP.act.admVoucher = d => { const a = appl(d.id); a.voucherIssued = true; stageTo(a, 'accepted', 'Admission voucher issued (Rs 5,000 + first month)', 'Admission voucher sent via WhatsApp & SMS'); };
-SP.act.admAdmit = d => {
-  const S = SP.S, a = appl(d.id), opts = SP.CLASSES.filter(c => c.grade === a.grade).sort((x, y) => SP.inClass(x.id).length - SP.inClass(y.id).length), c = opts[0];
-  const n = S.newStudents.length + 1, pid = 'PN' + (S.newParents.length + 1), sid = 'SN' + n, sur = a.parent.split(' ').slice(-1)[0];
-  const par = { id: pid, name: a.parent, sur, rel: a.rel, phone: a.phone, email: a.parent.toLowerCase().replace(/ /g, '.') + '@gmail.com' };
-  const stu = { id: sid, first: a.name.split(' ')[0], name: a.name, gender: a.gender, classId: c.id, grade: a.grade, roll: SP.inClass(c.id).length + 1, parentId: pid, admNo: 'SP-2026-' + (900 + n), dob: a.dob, address: 'House 5, Street 2, Model Town', transport: false, ability: .7, pref: 'New admission — assign a buddy for the first week', eContact: { name: 'Uncle ' + sur, phone: '0300-1234567' } };
-  S.newParents.push(par); S.newStudents.push(stu); SP.PARENTS.push(par); SP.PARENT_MAP[pid] = par; SP.STUDENTS.push(stu); SP.STU_MAP[sid] = stu;
-  const heads = [['Admission fee', 5000], ['Tuition fee', c.fee]];
-  S.fees[sid] = [{ id: 'V2609-A' + n, month: '2026-09', heads, total: 5000 + c.fee, due: TODAY, paid: true, paidOn: TODAY, method: 'Cash', sent: true }];
-  S.attToday[sid] = 'P'; a.studentId = sid;
-  stageTo(a, 'admitted', 'Admitted to ' + c.label + ' (' + stu.admNo + ')', a.name + ' admitted to ' + c.label + ' — student record created');
-};
 
 /* =============================== COMMUNICATIONS =============================== */
 const lastMsg = t => t.messages[t.messages.length - 1];
